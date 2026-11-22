@@ -22,21 +22,21 @@ TILE = {"A": ("#D3EBDC", "#17603A"), "C": ("#D2E2F6", "#1F4E8C"),
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap');
-html, body, [class*="st-"] {{ font-family: 'IBM Plex Sans', sans-serif; }}
+html, body, [class*="st-"]:not([data-testid="stIconMaterial"]):not(.material-icons):not([class*="icon"]) {{ font-family: 'IBM Plex Sans', sans-serif; }}
 h1, h2, h3 {{ font-family: 'Bricolage Grotesque', sans-serif !important; color: {INK}; letter-spacing: -0.01em; }}
 #MainMenu, footer {{ visibility: hidden; }}
-.block-container {{ padding-top: 2rem; max-width: 1200px; }}
+.block-container {{ padding-top: 4.5rem; max-width: 1200px; }}
 .stButton > button[kind="primary"] {{ background: {TEAL}; border: none; font-weight: 600; }}
 .stButton > button[kind="primary"]:hover {{ background: #0B5F58; }}
 .pp-title {{ font-family:'Bricolage Grotesque',sans-serif; font-size:3rem; font-weight:700; color:{INK}; line-height:1; margin:0; }}
 .pp-sub {{ color:{MUTED}; font-size:1.05rem; margin:.5rem 0 1.2rem 0; max-width:44rem; }}
-.pp-row {{ display:flex; align-items:center; gap:.9rem; margin:.45rem 0; }}
-.pp-label {{ width:8.5rem; font-size:.85rem; color:{MUTED}; flex-shrink:0; }}
+.pp-row {{ display:flex; flex-wrap:wrap; align-items:center; gap:.9rem; margin:.45rem 0; }}
+.pp-label {{ width:8.5rem; min-width:6rem; font-size:.85rem; color:{MUTED}; flex-shrink:0; }}
 .pp-tiles {{ display:flex; flex-wrap:wrap; gap:2px; font-family:'IBM Plex Mono',monospace; }}
 .pp-tile {{ width:1.35rem; height:1.7rem; display:flex; align-items:center; justify-content:center; border-radius:3px; font-size:.85rem; }}
 .pp-end {{ font-size:.75rem; color:{MUTED}; margin:0 .35rem; }}
-.pp-band {{ display:flex; border-top:1px solid #CFDAD6; border-bottom:1px solid #CFDAD6; margin:1.2rem 0 1.5rem 0; }}
-.pp-stat {{ flex:1; padding:1rem 1.2rem; border-left:1px solid #CFDAD6; }}
+.pp-band {{ display:flex; flex-wrap:wrap; border-top:1px solid #CFDAD6; border-bottom:1px solid #CFDAD6; margin:1.2rem 0 1.5rem 0; }}
+.pp-stat {{ flex:1; min-width:11rem; padding:1rem 1.2rem; border-left:1px solid #CFDAD6; }}
 .pp-stat:first-child {{ border-left:none; padding-left:0; }}
 .pp-num {{ font-family:'Bricolage Grotesque',sans-serif; font-size:2.2rem; font-weight:700; line-height:1.1; }}
 .pp-cap {{ color:{MUTED}; font-size:.9rem; }}
@@ -174,18 +174,31 @@ with t1:
         st.caption("The same sequences judged under four rules, as the percentage that pass. "
                    "No rule is the single right one, so report the range.")
         st.dataframe(rules, width="stretch")
+        st.subheader("Try your own tolerance")
+        st.caption("Choose how strict to be. The chart updates at once because it reuses the stored results.")
+        c1, c2 = st.columns(2)
+        window = c1.slider("Bases at each primer's 3' end that must match", 0, 8, 5)
+        limit = c2.slider("Most mismatches allowed in each primer", 0, 10, 4)
+        ex = core.explore(df, oligos, window, limit)
+        st.write(f"**{ex['All sequences']}%** of sequences pass when the last {window} bases at each 3' end must "
+                 f"match and each primer has at most {limit} mismatches.")
+        st.bar_chart(ex.drop("All sequences").rename("Share passing (%)"), height=240)
     st.subheader("Scorecard by serotype")
     st.caption("Exact or minor uses simple labels based on mismatch count, position and pair type. "
                "These labels are heuristic and have not been validated against laboratory data.")
     st.dataframe(card, width="stretch")
     st.subheader("Result by serotype")
     st.pyplot(figs["status"])
+    st.download_button("Download this figure (PNG)", core.fig_png(figs["status"]), "pathopanel_status.png",
+                       "image/png", key="dl_status")
 
 with t2:
     st.subheader("Where mismatches fall")
     st.caption("Each tile is one base of the oligo, with the 5' end on the left. Colour shows the share of "
                "sequences with a binding site that differ at that base. The box marks the last five bases at the 3' end.")
     st.pyplot(figs["landscape"])
+    st.download_button("Download this figure (PNG)", core.fig_png(figs["landscape"]), "pathopanel_landscape.png",
+                       "image/png", key="dl_landscape")
     if figs["amplicon"] is not None:
         st.subheader("Amplicon length")
         lengths = df["Amplicon length"].dropna()
@@ -220,6 +233,17 @@ with t4:
     st.caption("This is a sequence-level idea only. Degenerate bases can change melting temperature, specificity "
                "and primer-dimer risk, so any redesign needs laboratory testing. Very high degeneracy is not practical.")
     st.dataframe(rep, width="stretch", hide_index=True)
+    st.subheader("Alternative: a small mix of serotype-specific versions")
+    st.caption("Instead of one highly degenerate oligo, use the most common version from each serotype. "
+               "A mix adds cost and can raise primer-dimer risk, so it also needs laboratory testing.")
+    for k, o in oligos.items():
+        mix = core.serotype_mix(k, o, site_log)
+        if mix is None:
+            continue
+        table, covered, now = mix
+        st.write(f"**{core.LABEL[k]}:** a mix of {len(table)} version(s) would match exactly {covered}% of sites, "
+                 f"against {now}% for the current oligo.")
+        st.dataframe(table, width="stretch", hide_index=True)
     st.subheader("Most common binding-site variants")
     pick = st.selectbox("Oligo", list(oligos), format_func=lambda k: core.LABEL[k])
     vt = core.variant_table(site_log, pick)
@@ -255,12 +279,21 @@ and the placement with the fewest mismatches is kept. Serotype is read from the 
 amplification, and a mismatch does not prove diagnostic failure.
 
 **Limits.** The mismatch labels, the four-mismatch cutoff and the weights are heuristic and have not been validated
-against laboratory data. Pair-type weights come from a study of 3' end mismatches and are applied here to all positions.
+against laboratory data. The cutoff follows a synthetic-template study in which four mismatches in a 20-base primer blocked
+the reaction; here it is applied to any primer and any position. Pair-type weights come from a study of 3' end mismatches
+and are applied here to all positions.
 Public sequence collections are not a random sample of circulating virus, and repeated sequences from single
 studies can inflate some groups.
 
 **References.**
 - Lanciotti RS, et al. 1992. Journal of Clinical Microbiology (D1 and D2 primers).
+- Lefever S, Pattyn F, Hellemans J, Vandesompele J. 2013. Single-nucleotide polymorphisms and other mismatches reduce
+  performance of quantitative PCR assays. Clinical Chemistry 59:1470-1480.
+- Vanneste K, Garlant L, Broeders S, et al. 2018. Application of whole genome data for in silico evaluation of primers and
+  probes routinely employed for the detection of viral species by RT-qPCR using dengue virus as a case study. BMC
+  Bioinformatics 19:312.
+- Otwell T, et al. 2025. Reality check: testing the in silico predictions of false negative results due to mutations in
+  SARS-CoV-2 PCR assays using templates with mismatches in vitro. Frontiers in Cellular and Infection Microbiology 15:1524025.
 - Stadhouders R, et al. 2010. The effect of primer-template mismatches on the detection and quantification of nucleic acids
   using the 5' nuclease assay. Journal of Molecular Diagnostics 12(1):109-117. doi:10.2353/jmoldx.2010.090035
 """)

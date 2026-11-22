@@ -92,7 +92,9 @@ def mismatch_weight(oligo_base, site_base, dist_from_3p, is_primer):
 
 
 def classify(n_mm, score):
-    """Heuristic labels. The four-mismatch cutoff is an arbitrary threshold."""
+    """Heuristic labels. Four mismatches in a 20-base primer blocked amplification in a synthetic-template
+    study (Lefever et al. 2013, Clin Chem 59:1470-1480, as summarised by Vanneste et al. 2018). Using that
+    cutoff for any primer length and any position is an extension of the study."""
     if n_mm == 0:
         return "Exact"
     if n_mm >= 4 or score > 5:
@@ -290,6 +292,45 @@ def redesign(oligos, site_log, threshold):
                      "Exact sites with suggestion (%)": round(100 * after / total, 1),
                      "Caution": "; ".join(caution)})
     return pd.DataFrame(rows)
+
+
+def explore(df, oligos, window, max_mm):
+    """Percentage of sequences passing when the last `window` bases of each primer must match and each primer
+    has at most `max_mm` mismatches. Needs no new alignment, only the stored results."""
+    ok = np.ones(len(df), dtype=bool)
+    for k in primer_keys(oligos):
+        L = len(oligos[k])
+        last = df[f"{k} positions"].fillna("").apply(lambda t: max(map(int, t.split(", "))) if t else 0)
+        found = df[f"{k} mismatches"].notna()
+        ok &= (found & (last <= L - window) & (df[f"{k} mismatches"] <= max_mm)).to_numpy()
+    out = df.assign(ok=ok).groupby("Serotype")["ok"].mean().mul(100).round(1)
+    out = out.reindex(serotype_order(df))
+    out["All sequences"] = round(100 * ok.mean(), 1)
+    return out
+
+
+def serotype_mix(key, oligo, site_log):
+    """Most common binding site in each serotype, offered as a small mix of oligo versions."""
+    sites = site_log[key]
+    if not sites:
+        return None
+    counts = Counter(s for _, s, _ in sites)
+    total = len(sites)
+    top = {}
+    for sero in sorted({sr for sr, _, _ in sites} - {"unknown"}):
+        c = Counter(s for sr, s, _ in sites if sr == sero)
+        top.setdefault(c.most_common(1)[0][0], []).append(sero)
+    rows = [{"Oligo version (5' to 3')": site, "Most common in": ", ".join(sero),
+             "Sites matching exactly": counts[site], "Share of all sites (%)": round(100 * counts[site] / total, 1)}
+            for site, sero in top.items()]
+    covered = round(100 * sum(counts[s] for s in top) / total, 1)
+    return pd.DataFrame(rows), covered, round(100 * counts.get(oligo, 0) / total, 1)
+
+
+def fig_png(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    return buf.getvalue()
 
 
 # ------------------------------------------------------------------ figures
